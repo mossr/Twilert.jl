@@ -56,6 +56,30 @@ function sendmsg(msg::Message)
     end
 end
 
+function sendmsgcurl(msg::Message)
+    sid = msg.creds.sid
+    token = msg.creds.token
+    encoded = "$sid:$token"
+
+    body = msg.body
+    to = msg.to
+    from = msg.from
+
+    url = "$TWILIO_BASE/Accounts/$sid/Messages.json"
+
+    due = "--data-urlencode"
+    cmd = `curl -X POST "$url" $due "From=$from" $due "To=$to" $due "Body=$body" -u $encoded`
+
+    resp = readall(cmd)
+    respjson = JSON.parse(resp)
+
+    if respjson["status"] == "queued"
+        return :ok
+    else
+        return :error
+    end
+end
+
 function loadcfg()
     cfgfile = Nothing
     try
@@ -92,7 +116,7 @@ function alert(body::String, to::String, from::String, creds::Credentials)
     end
 
     msg = Message(body, to, from, creds)
-    result = sendmsg(msg)
+    result = sendmsgcurl(msg)
 
     return result
 end
