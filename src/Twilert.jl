@@ -3,7 +3,7 @@ module Twilert
 using HTTPClient.HTTPC
 using JSON
 
-export alert
+export alert,receivemsg
 
 # Constants
 
@@ -59,16 +59,24 @@ end
 function sendmsgcurl(msg::Message)
     sid = msg.creds.sid
     token = msg.creds.token
-    encoded = "$sid:$token"
+    key = "$sid:$token"
 
     body = msg.body
     to = msg.to
     from = msg.from
 
     url = "$TWILIO_BASE/Accounts/$sid/Messages.json"
-
     due = "--data-urlencode"
-    cmd = `curl -X POST "$url" $due "From=$from" $due "To=$to" $due "Body=$body" -u $encoded`
+
+    if ismediaurl(body)
+        prebody = "-d"
+        body = "MediaUrl=$body"
+    else
+        prebody = due
+        body = "Body=$body"
+    end
+
+    cmd = `curl --silent -X POST $url $due From=$from $due To=$to $prebody $body -u $key`
 
     resp = readall(cmd)
     respjson = JSON.parse(resp)
@@ -76,7 +84,51 @@ function sendmsgcurl(msg::Message)
     if respjson["status"] == "queued"
         return :ok
     else
+        println(cmd)
+        println(resp)
         return :error
+    end
+end
+
+function receivemsg(;returnmsg::Bool = false, listen = false)
+    cfg = loadcfg()
+    creds = Credentials(cfg["sid"], cfg["token"])
+    sid = creds.sid
+    token = creds.token
+    key = "$sid:$token"
+    url = "$TWILIO_BASE/Accounts/$sid/Messages.json"
+
+
+    function getmsg()
+        msgs = readall(`curl --silent -X GET $url -u $key`)
+        return JSON.parse(msgs)
+    end
+
+    msgsjson = getmsg()
+    M = length(msgsjson["messages"])
+    if listen
+        while length(getmsg()["messages"]) == M
+            sleep(1)
+        end
+        msg = getmsg()["messages"][2]["body"]
+    else
+        msg = msgsjson["messages"][2]["body"]
+    end
+
+    if lowercase(msg[1:3]) == "jl:" # messages that start with jl: indicate a Julia expression
+        jlexp = msg[4:end]
+        println(jlexp)
+        println(eval(parse(jlexp)))
+    else
+        println(msg)
+    end
+
+    if listen
+        receivemsg(listen = listen)
+    end
+
+    if returnmsg
+        return msg
     end
 end
 
@@ -102,6 +154,10 @@ function loadcfg()
     end
 
     return cfg
+end
+
+function ismediaurl(mediaurl::String)
+    return ismatch(r"https*://.*\.\w+$", mediaurl)
 end
 
 # Exported functions
